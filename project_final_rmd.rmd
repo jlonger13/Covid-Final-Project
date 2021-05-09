@@ -1,0 +1,789 @@
+---
+title: "Election Results and the Pandemic"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warnings = FALSE, message = FALSE, error = FALSE, results = "hide", fig.width=8, fig.height=4)
+knitr::opts_knit$set(root.dir = '/Users/Ben Dorph/Desktop/stat571projec/data')
+knitr::opts_chunk$set(fig.width = 10, fig.height = 7)
+options(scipen = 0, digits = 3)  # controls base R output
+if(!require('pacman')) {
+  install.packages('pacman')
+}
+pacman::p_load(dplyr, ggplot2, gridExtra, ggrepel, readxl, kableExtra, xtable, bestglm, glmnet, leaps, car, tidyverse, pROC, caret, tinytex, randomForest, reshape)
+
+
+```
+#  Executive Summary  
+
+  The 2020 election was unlike any other, most prominently due to the pandemic it took place during. The pandemic's effects were felt by practically every American and changed lives in a diverse manner of ways. Much of the political discussion during the 2020 election was focused on how the changes to people's lives would actually change the way they voted. By taking data that represents not only the direct effects of the pandemic on a community, like deaths or cases, but also considering the policies in place and individuals compliance with those policies, we can form a more holistic idea of how the pandemic was predictive of results in the 2020 election.
+  To understand how the 2020 election results were affected by the pandemic and what aspects of the pandemic were most prominent potentially influencing the way people vote, we built several models. First, by using LASSO and minimizing CP, we were able to find an optimal linear regression model. However, due to concerns regarding how well the data met the assumptions of a linear model, we also include a logistic model. The logistic model was also found using LASSO and choosing a value of lambda that provides a comparatively smaller model. Both of these models illustrate that the direct effects of the pandemic, such as cases or cases_avg, as well as certain metrics regarding individuals compliance with lockdown measures, such as residential movement, play large roles in the predicted outcome of the election in a specific county and thus how the pandemic could have potentially influenced voting overall.
+  Finally, in an effort to also introduce a purely predictive model, we used discretized the response variable and used random forest to generate a model that could be used to predict the results of counties' elections, which reinforced the importance of metrics such as cases or residential movement had on prediction and potentially the election.
+  Through this process we found that aspects of the pandemic were certainly important in predicting the outcome of the election. More generally, we can say that the pandemic was certainly significant in that it was either correlated with or causal of changes in the way individuals voted for Trump or Biden.
+    
+# Data Summary
+Understanding the pandemic's impact on the election results, and how aspects of the pandemic can predict election results, obviously depends on having a holistic understanding of the pandemic itself. However, the pandemic is not a simple event, in fact, its affects on everyone's lives has been more wide-reaching than the direct effects of COVID-19. To better capture the pandemic's effect on the election, it was necessary to have data regarding the disease itself, but additionally necessary to have data that speaks to the lockdowns in place in a given state and the compliance with those lockdowns. Thus, it was necessary to collect data from a wide range of sources.
+  
+As we are seeking to predict election results, it is obviously necessary to have data that directly measures the results of the election. As the pandemic affected communities so uniquely, the best way to understand the pandemic's effects was to study the election results by county. Thus, this project focuses on the counties of the elevent states with the closest election results: Georgia, Arizona, Wisconsin, Pennsylvania, North Carolina, Michigan, Nevada, Florida, Texas, Minnesota, and New Hampshire. Although studying all fifty states may be ideal, each state can report the election results in unique ways that make cleaning the data and rendering it in a common form difficult. Thus, collecting data for the other thirty nine states remains a possible point of further exploration beyond the scope of this project.
+  
+The election results for these states was found from two main sources: the states' respective Secretary of State office, which reports election outcomes, and an organization called [OpenElections](http://openelections.net/about/), which collects and aggregates election results for use in research. The following states' election results were found via their Secretary of State: [Arizona](https://azsos.gov/elections/voter-registration-historical-election-data/historical-election-results-information), [Wisconsin](https://elections.wi.gov/elections-voting/results), [Pennsylvania](https://www.electionreturns.pa.gov/), [Michigan](https://mielections.us/election/results/2020GEN_CENR.html), and [Texas](https://www.sos.state.tx.us/elections/historical/index.shtml). The election results for Georgia, North Carolina, Nevada, Florida, Minnesota, and New Hampshire were source from [OpenElections](https://github.com/openelections). The data from all of these respective sources posed many challenges in cleaning as they often are structured in different ways. Additionally, OpenElections primarily has data available at the precinct-level, which is more exact than necessary for this project, so it required restructuring the data so that it was at the county level rather than the precinct level. Thus, from all of these sources, the data was aggregated so that there were total votes cast for Biden in each county, and total votes cast for Trump in each county.
+  
+Beyond the election results, it was also necessary to have COVID-19 data, which was sourced from the [NYT](https://github.com/nytimes/covid-19-data). This data was at the county level already and from this the following variables were extracted: cumulative cases at the time of the election, cumulative deaths and the time of the election, 7-day average of new cases at the time of the election, 7-day average of deaths at the time of the election, 7-day average of cases per 100k at the time of the election, and 7-day average of deaths per 100k at the time of the election.
+  
+As preciously discussed, the effects of the pandemic spread far beyond just the amount of cases or deaths present in a community. Thus, we also sourced data from a project started by Oxford to track information regarding the stringency of lockdowns. [The Oxford COVID-19 Government Response Tracker](https://www.bsg.ox.ac.uk/research/research-projects/covid-19-government-response-tracker) has data available at the state level tracking the overall stringency of the lockdown. From this data the following variables were extraxted: C1_School.closing, C2_Workplace.closing, C7_Restrictions.on.internal.movement, C8_International.travel.controls. C3_Cancel.public.events, C4_Restrictions.on.gatherings, C5_Close.public.transport, C6_Stay.at.home.requirements. All of these variables are on an ordinal scale and describe the policies in place. The precise definitions of each variable's scale [can be found here](https://github.com/OxCGRT/covid-policy-tracker/blob/master/documentation/codebook.md).
+  
+Finally, it was also important to find a variable that captures individual's attitudes towards the pandemic and the policies in place to curb the pandemic. To gain insight into this aspect of the data, COVID-19 lockdown compliance data was sourced from google. This data shows how movement had decreased in any given community. The data and more information about this project [can be found here](https://www.google.com/covid19/mobility/). From this data, the following variables were extracted: retail_recreation, grocery_pharmacy, parks, transit, workplace, and residential. Each of these variables is the month average of how movement decreased for a given category. For instance, transit measures the average, over the month prior to the election, percent decrease or increase in movement in places related to public transport.
+  
+Thus, combining all this data from all these different sources gives us holistic insight into the pandemic's effect on communities at the county level. The data took substantive work to clean and the process for this cleaning is available in the appendix. For the purpose of this project, we will be working with projectdatafinal.csv, which is the fully cleaning version of all of this data.
+  
+# EDA
+To better understand some of the challenges the data poses, its important to know how many entries for each variable are NA. To give some idea of scale, there are 610 total observations. The following table displays only the columns with a non-zero amount of NAs.
+```{r}
+projectdatafinal <- read.csv("projectdatafinal.csv")
+```
+
+```{r, results='asis'}
+na_count <-colSums(is.na(projectdatafinal))
+na_count <-na_count[which(na_count != 0)]
+na_count <- as.data.frame(na_count)
+na_count <- na_count %>% dplyr::rename(Number_of_NAs = na_count)
+kable(na_count)
+```
+  
+It is clear that one of the challenges of working with this data primarily lies with the variables regarding the compliance data. As this data is still in progress, Google does not yet have compliance data for every county and for some counties it only has partial compliance data. This poses challenges for a model that includes more than one of these variables, as it would likely lead to many of the observations having to be excluded.
+  
+In terms of prediction, it isn't sensical to try and predict the number of votes for Trump or Biden, instead the predictor variable will be the margin of votes Biden recieved, that is BidenMargin= Votes recieved for Biden - Votes received for Trump.
+```{r}
+projectdatafinal <- projectdatafinal %>% mutate(bidenmargin = Biden - Trump)
+```
+Here is the quantiles of Biden's margin of votes in each county:
+```{r, results = 'asis'}
+quantiles <- quantile(projectdatafinal$bidenmargin, probs = c(.25,0.5,0.75))
+quantiles <- as.data.frame(quantiles)
+quantiles <- quantiles %>% dplyr::rename(Quantiles = quantiles)
+kable(quantiles)
+```
+```{r}
+data <- read.csv("projectdatafinal.csv", header = T, na.strings = c("", "?"))
+```
+```{r, include=FALSE}
+#changing covid data from type chr to num for analysis
+data$cases_avg_per_100k = as.numeric(data$cases_avg_per_100k)
+data$deaths_avg_per_100k = as.numeric(data$deaths_avg_per_100k)
+data$cases = as.numeric(data$cases)
+data$deaths = as.numeric(data$deaths)
+data$cases_avg = as.numeric(data$cases_avg)
+data$deaths_avg = as.numeric(data$deaths_avg)
+```
+
+```{r}
+#creating new column that shows if county voted democratic (1) or republican (0)
+data$election_result <- ifelse(data$Biden > data$Trump, 1, 
+                               ifelse(data$Biden < data$Trump, 0, 'NA'))
+```
+```{r, include=FALSE}
+#setting new column as levels
+levels(as.factor(data$election_result))
+data$election_result <- as.factor(data$election_result)
+```
+Here is a plot of cases_avg_per_100k by election outcome, with zero being voting for Trump and 1 being voting for Biden:
+```{r}
+ggplot(data, aes(x = state, y = cases_avg_per_100k, fill = election_result)) + geom_boxplot() + theme_bw() + theme(legend.position = "bottom")
+```
+
+  We can see from this boxplot that in Nevada and New Hampshire, the true medians of COVID cases per 100k between democrats and republican do differ at a 95% confidence level because both of the boxes do not overlap.  In Nevada, counties with higher COVID rates voted for Biden while in New Hampshire, counties with higher COVID rates voted for Trump.  Looking at the box plot as a whole, we see there are far more outliers on the Trump side, which tells us that there were many pro-Trump counties that had significantly higher COVID cases, beyond the 3rd quartile. 
+
+
+  
+
+To get an intuition about the models we will try to build, let's visualize the basic relationships in the data through a correlation heatmap and pairwise scatter plots on a subset of the data. 
+```{r, echo= FALSE}
+Pdata <- read.csv("projectdatafinal.csv")
+Pdata$Biden_Margin <- Pdata$Biden - Pdata$Trump
+Pdata.omitNA <- Pdata %>% na.omit()
+
+
+
+#correlation heatmap
+
+corr.table <- Pdata.omitNA %>% select_if(is.numeric) %>% cor()  %>% melt()
+corr.table %>%
+  ggplot(aes(x=X1, y=X2, fill=value)) +
+  geom_tile() +
+  xlab("") +
+  ylab("") +
+  guides(fill = guide_legend(title = "Correlation")) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+  scale_x_discrete(limits = rev(levels(corr.table$Var1))) +
+  scale_fill_gradient(low = "blue",high = "red")
+
+
+
+
+#pairwise scatterplots
+Pdata.omitNA %>% select_if(is.numeric)%>% 
+select(Biden_Margin, retail_recreation, cases_avg_per_100k, C4_Restrictions.on.gatherings, C3_Cancel.public.events, transit ) %>%
+pairs()  # base pair-wise scatter plots
+#ggpairs()
+  
+
+
+
+
+
+```
+  
+  Noticeable relationships between BidenMargin and retail_recreation/ transit. In both cases, Biden winning by a higher margin tends to happen when there are larger reductions in these types of activities.The shape is more exponential than linear, with counties having greater than a 40-50% reduction in these activities showing a strong preference for Biden.  Looking at the relation between cases_avg_per_100k and retail_recreation/ transit variables, there also exists a correlation with an exponential shape. In this case, cases_avg_per_100k drops sharply with a small to medium sized reduction in these activities and continues to taper off with greater reductions (>%50 or so).
+
+
+# Linear Model
+
+```{r}
+fittest1 <- lm(bidenmargin~ cases, projectdatafinal)
+fittest2 <- lm(bidenmargin~ cases_avg, projectdatafinal)
+fittest3 <- lm(bidenmargin~ cases_avg_per_100k, projectdatafinal)
+fittest4 <- lm(bidenmargin~ deaths, projectdatafinal)
+fittest5 <- lm(bidenmargin~ deaths_avg, projectdatafinal)
+fittest6 <- lm(bidenmargin~ deaths_avg_per_100k, projectdatafinal)
+```
+
+  One of the most funamendtal questions we may have regarding this data, is whether or not the variables directly related to COVID severity, such as cases, cases_avg, cases_avg_per_100k, deaths, deaths_avg, and deaths_avg_per_100k, are predictive or election results. This is important to examine as it was a central question during the entirety of the election cycle. The question of how communities affected by the pandemic would vote had huge potential ramifications for the election overall. Preforming a linear regression of BidenMargin against each of the relevant variables can reveal some interesting insights.
+  
+  Some of the models are not significant, for instance, regressing with deaths_avg_per_100k or cases_avg_per_100k, do not return significant results. However, the single-predictor model that preforms the best is bidenmargin with cases_avg as a predictor.
+```{r, results = 'asis'}
+print.xtable(xtable(summary(fittest2)), type = "html")
+```
+  Looking at the results of this regression model, we can see that it preforms admirably. It has an R-Squared of .317, suggesting that almost a third of the response variables variance is explained by using cases_avg as a predictor. Additionally, as cases_avg goes up by one, Biden's margin of votes is expected to go up by 250. Initially, this suggests dramatic results for election analysis generally, however, this regression does not necessarily illustrate that it was the increase in avergae cases prior to the election that led to more votes for Biden. Rather, cases_avg is likely very closely tied to population overall, as more people means more possible cases, and a more dense and populace place is likely to be urban, which generally votes overwhelmingly for democrats. Thus, although it is possible that COVID severity lead to better outcomes for Biden in the election, it is not possible to see this with certainty from the above model. Thus, to better understand how the pandemic affected the election overall, we will introduce more variables to the model by using backward selection.
+  
+   
+  To find the best linear regression model possible we will use regsubsets with a backward selection method. We will use Mallow's CP as a decision criterion for a model.
+    
+```{r, echo=FALSE}
+Pdata.cropped <- Pdata.omitNA %>% select (-c(X, state, county, Biden, Trump))
+fit.full <- lm(Biden_Margin~., Pdata.cropped)
+#summary(fit.full)
+
+#backward search, start with full model, kick out variables with highest p_value (least significant)
+fit.back <- regsubsets(Biden_Margin ~ ., data=Pdata.cropped, nbest = 1, nvmax = 40, method = "backward")
+f.b <-summary(fit.back)
+
+#finding the optimal model size
+opt.size <-  which.min(f.b$cp) 
+opt.size
+
+#find the variables which are in the optimal size model
+fit.fb.var <- f.b$which # logic indicators which variables are in
+col.names<- colnames(fit.fb.var)[fit.fb.var[opt.size,]][-1] # output variables selected
+
+#Now fit a linear model with just these variables included
+Pdata.optsubset <- Pdata.cropped %>% select(c(col.names, Biden_Margin))
+lmfit.final <- lm(Biden_Margin~., Pdata.optsubset)
+```
+  This then provides us with the following model: 
+```{r, results = 'asis'}
+print.xtable(xtable(summary(lmfit.final)), type = "html")
+```
+  In terms of preformance, this model is actually quite impressive. It has an R-Squared of .658, thus explaining almost two thirds of the variance of Biden's vote margin over Trumps.  The model includes 10 variables: cases_avg, cases_avg_per_100k, deaths, deaths_avg_per_100k, C3_Cancel.public.events, C7_Restrictions.on.internal.movement, C8_International.travel.controls, parks, and residential. We can see that the more restrictive movement policies such as C3_Cancel.public.events, C7_Restrictions.on.internal.movement, and C8_International.travel.controls lead to higher biden margins. This may be due to the political polarization of the response to the virus and thus making states that are already more liberal more likely to institute policies that would restrict internal movement. The variables associated with COVID severity paint a mixed picture of how they are correlated with the election results. For instance, as cases_avg increase and deaths_avg_per_100k increase, Biden's margin of votes is expected to increase as well. However, as cases_avg_per_100k, deaths, and deaths_avg increase, Biden's margin is predicted to fall. This does not immediately lead to a clear intepretation of how COVID severity itself, and not the policies around it, influenced the election. We can also see that as movement to parks decrease, Biden's margin of votes increases and as residential movement decreases Biden's margin of votes decreases. Although it is difficult to come to any strong conclusions from only this regression, this may point to the fact that counties that were more compliant with lockdowns did not vote or were not as supportive for Biden. However, it is not possible to determine this with any real certainty and can only state that the two are correlated.
+  
+How well are the assumptions of linear regression being met by this model?
+
+```{r, echo=FALSE}
+
+
+plot(lmfit.final,1)
+plot(lmfit.final,2)
+```
+  
+  Looking at the residuals we can see that our model overpredicts how much Biden will win by in very red counties and generally under predicts how much Biden will win by in very blue counties. The shape of the residuals and the QQ plot do raise some questions about how well a linear fits this data overall. It is hard to tell why this may be the case, though we may guess that due to intense polarization, certain counties have drifted vary far right or left in the political spectrum. Due to concerns about the residuals and the QQ plot, we now turn to logistic regression as a potential means to predict election outcomes in counties.
+
+
+#  Logistic Regression  
+
+  While predicting the numerical margins in a specific county obviously has value, the nature raises data about the assumptions necessary to use a linear model. This motivates the creation of a logistic model, which simply seeks to predict whether or not Biden won a specific county or not. In order to do this, we will employ LASSO to determine the optimal model for a logistic regression.
+
+```{r, echo=FALSE}
+#create label variable
+Pdata.omitNA$BidenWon <- ifelse(Pdata.omitNA$Biden_Margin>0, 1, 0)
+#drop highly correlated variables
+Pdata.logreg.input <- Pdata.omitNA %>% select(-c(Biden_Margin, X, state, county, Biden, Trump))
+X <- Pdata.logreg.input %>% select(-BidenWon)
+X <- as.matrix(X)
+Y <- as.matrix(Pdata.logreg.input$BidenWon)
+fit1.cv <- cv.glmnet(X,Y, alpha=1, family = "binomial", nfolds = 10, type.measure = "deviance")
+```
+  After preforming LASSO on the data we have the following graph of Log(Lambda) and Binomial Deviance:
+```{r, results = 'asis'}
+plot(fit1.cv)
+```
+  
+  Due to the fact that there are many NAs in our data, we are left with a comparatively smaller sample than would be ideal after preforming LASSO and thus excluding rows with NA entries. Thus, instead of minimizing CV, a better approach may be to use the value of lambda that provides the smaller model. This will further protect us against overfitting, which we may be prone to due to the smaller sample size. By using the lambda that is within one standard error to the minimization of lambda, we get a model of a relatively small size where only about 3 variables are non-zero. Here is a logistic model of the predictors with non-zero coefficients with the higher value lambda.
+```{r, results = "asis"}
+coef.1se <- coef(fit1.cv, s="lambda.1se")
+coef1se <- coef.1se[which(coef.1se != 0)]
+log.reg.fit.s <- glm(BidenWon~ cases_avg_per_100k + transit + residential, Pdata.logreg.input, family = "binomial")
+print.xtable(xtable(summary(log.reg.fit.s)), type = "html")
+```
+  We can see that transit, although selected, is not a significant variable. Thus, we will remove it and then make a new model without it:
+```{r, results = 'asis'}
+log.reg.fit.s <- glm(BidenWon~ cases_avg_per_100k + residential, Pdata.logreg.input, family = "binomial")
+print.xtable(xtable(summary(log.reg.fit.s)), type = "html")
+```
+  Now we can see that we have a model with only two non-zero variables: cases_avg_per_100k and residential. As cases_avg_per_100k increases, the chance of Biden winning that county actually decreases. This could indicate that, despite what was expected during the election, the counties with the worst COVID severity actually didn't vote for Biden more. Instead, it could be that experiencing COVID severely in a community could actually lead to more resistance to the pandemic, which would lead to greater support for the right of the political spectrum who often critiqued the response to the pandemic. It is also interesting that the more compliant individuals where with the lockdown restrictions in residential areas, the less likely they are to vote for Biden. The evidence here strongly contradicts what was commonly expected during the election cycle.Expectations often where that the areas hardest hit by the pandemic would vote more for biden and individuals who restricted their movement the most, and thus were more compliant with suggested lockdown procedures, would vote more for Biden as well. However, it is not possible to state these conclusions with certainty, but rather that the result here is simply unexpected given expectations. Additionally, due to the model's small size, it may not necessarily be very good at prediction. To determine this, let's compare it to the performance of a logistic model with all of the variables. it may be that as the model is so small, it may preform quite badly and thus is important to understand its performance.
+
+  Here we can see the ROC curve for the above model and the model with all of the variables included:  
+```{r}
+#all variables included
+log.reg.fit.f <- glm(BidenWon~., Pdata.logreg.input, family=binomial)
+#only the variables we found to be statistically significant from linear regression
+Pdata.optsubset1 <- Pdata.optsubset 
+
+Pdata.optsubset1$BidenWon <- ifelse(Pdata.optsubset1$Biden_Margin>0,1,0)
+Pdata.optsubset1 <- Pdata.optsubset1 %>% select(-Biden_Margin)
+##log.reg.fit.s <- glm(BidenWon~., Pdata.optsubset1 , family=binomial)
+
+
+
+
+logreg.roc.f<- roc(Pdata.logreg.input$BidenWon, log.reg.fit.f$fitted, plot=F, col="red")
+logreg.roc.s<- roc(Pdata.optsubset1$BidenWon, log.reg.fit.s$fitted, plot=F, col="blue")
+
+
+
+#How well does the full model stack up vs a simplified model, how much information is gained by using all variables?
+plot(1-logreg.roc.f$specificities, 
+     logreg.roc.f$sensitivities, col="green", lwd=3, type="l",
+     xlab="False Positive", 
+     ylab="Sensitivity")
+lines(1-logreg.roc.s$specificities, logreg.roc.s$sensitivities, col="blue", lwd=3)
+
+legend("topleft",
+       c(paste0("fit.f AUC=", round(logreg.roc.f$auc,2)), 
+         paste0("fit.s AUC=", round(logreg.roc.s$auc, 2))),
+       col=c("green", "blue"),
+       lty=1)
+
+```
+Comparing the area under curve for both fits, we can see very little improvement is made to the classifier by including the fullset of variables. Thus, the smaller model is likely a very good model overall.
+
+#  Random Forest
+  Although we have created an effective model for logistic regression, we may still want a model that can give a more precise prediction. As we have shown that a linear regression model may not be the best fit for this data, we can instead employ the technique of random forest to give us a more precise prediction of what Biden would win or lose by. To do this, we will turn BidenMargin into a discrete variable in bins of 10,000 votes.
+
+```{r}
+#Pdata.cropped
+Pdata.Rf.input <- Pdata.cropped
+Pdata.Rf.input <- Pdata.Rf.input %>% mutate(Biden.Margin = cut(Biden_Margin, breaks = c(-Inf, -50000, -40000, -30000, -20000, -10000, 0, 10000, 20000,30000,40000,50000, Inf)))
+Pdata.Rf.input <- Pdata.Rf.input %>% select(-Biden_Margin)
+Pdata.Rf.input
+```
+
+
+To find the best random forest we first need to determine the optimal number of trees to include. Below is a grpah of model accuracy and ntrees:  
+
+```{r, echo=FALSE}
+set.seed(438)
+
+
+
+
+#function to get the accuracy of a random forest trained with 6 (roughly n/3) features presented at each split point for a given number of trees
+get_accuracy <- function(n) {
+  accurates=0
+  fit.rf.5 <- randomForest(Biden.Margin~., Pdata.Rf.input, mtry=6, ntree=n)
+  #names(fit.rf.5)
+  fit.rf.5.pred <- predict(fit.rf.5, Pdata.Rf.input)
+  for(i in 1:142){
+    if(fit.rf.5.pred[i]== Pdata.Rf.input$Biden.Margin[i]){
+      accurates<-accurates+1
+    }
+  }  
+  accuracy<-accurates/142
+  
+
+  
+  return (accuracy)
+}
+
+Pct.correct <- 1:60
+ntrees <- 1:60
+Model_accuracy <- 1:60
+for (i in 1:60){
+  Model_accuracy[i] <-get_accuracy(i)
+}
+
+plot(ntrees, Model_accuracy, col= "blue")
+
+
+
+
+
+
+
+
+
+
+#Model_accuracy
+
+
+
+
+
+
+
+
+```
+
+  The  accuracy appears to stop level off after about 9 trees, we will fix this parameter and now vary mtry from 1 to 25. To find the optimal number of variables to pick from at each split point, we will plot error vs number of variables presented at each split point.
+
+```{r, echo= FALSE, message = FALSE, warnings = FALSE}
+
+set.seed(438)
+
+get_accuracy1 <- function(m) {
+  accurates=0
+  fit.rf.5 <- randomForest(Biden.Margin~., Pdata.Rf.input, mtry=m, ntree=9)
+  #names(fit.rf.5)
+  fit.rf.5.pred <- predict(fit.rf.5, Pdata.Rf.input)
+  for(i in 1:142){
+    if(fit.rf.5.pred[i]== Pdata.Rf.input$Biden.Margin[i]){
+      accurates<-accurates+1
+    }
+  }  
+  accuracy<-accurates/142
+  
+
+  
+  return (accuracy)
+}
+
+1-get_accuracy1(3)
+
+mtry<- 1:21
+
+Model.error.rate <- 1:21
+
+for (i in 1:21){
+  Model.error.rate[i]<-1-get_accuracy1(i)
+}
+
+plot(mtry, Model.error.rate, col="blue")
+
+```
+A random forest with 9 trees and only 3 variables presented at each split point achieves a very low error rate, close to 0. After that models with 10,15, and 20 for mtry seem very accurate as well. Thus, we will do a model mtry =  and ntree=9. Here is a graph of the importance of each of the variables in the random forest and their index:
+```{r, echo = FALSE, results = 'asis'}
+
+fit.rf.final <- randomForest(Biden.Margin~., Pdata.Rf.input, mtry=3, ntree=9)
+
+
+#names(fit.rf.final)
+col1 <- names(Pdata.Rf.input)[-21]
+
+#shows how often a variable was selected when it was option
+plot(fit.rf.final$importance)
+col2 <- fit.rf.final$importance
+df <- cbind(col1,col2)
+df <- df[order(-col2),]
+df <- as.data.frame(df)
+df$Importance <- df$MeanDecreaseGini
+df <- df %>% select(Importance)
+#the 3 variables selected have indices 1, 20, and 6. They are:
+```
+  The plot does not easily lend itself to interpretation, so here is a table with the importance of each of the variables:
+```{r, results = 'asis'}
+print.xtable(xtable(df),type="html")
+```
+  The variables most important to the random forest are residential, deaths_avg, cases. This mimics a similar choice in variables as the other models we have created in the past. Thus, if it is necessary to have a model that gives a prediction beyond a probability of voting for Biden or not, and the assumptions of linear regression are not trusted, then there is also this model that can provide a more specific estimate of how individuals will vote.
+
+# Conclusion
+ In this project, we took data from a wide variety of sources to create a holistic picture of how the pandemic and the policies in place changed peoples' lives. Via preforming a linear regression and logistic regression through LASSO, we found that variables such as cases_avg_per_100k and residential, as these were present in both types of regression. This indicates that the severity of COVID in a given community was certainly important in influencing election results, or were representative of confounding variables that were important in influencing the election.
+ In order to have a model that can serve a predictive function for other counties, we used random forest to create a model while avoiding the potential downfalls of linear regression due to concerns about how well the data met the assumptions necessary for such a model. In this model, variables such as residential and deaths_avg also played very prominent roles in determining a prediction. This further supports the idea that the severity of the COVID pandemic and the manner in which people limited their movement, as seen through their decrease in mobility in residential areas, were important factors in understanding how the pandemic affected election outcomes.
+  Overall, this analysis indicates that the way people reacted to the pandemic and the manner in which the pandemic affected a community was certainly important in predicting election results and indicates that the expectation that the pandemic would affect the election outcome in some way is likely realistic.
+# Appendix
+
+```{r, eval=FALSE}
+compliance2020 <- read.csv("compliance_2020.csv")
+```
+
+```{r, eval=FALSE}
+compliance2020 <- compliance2020 %>% filter(sub_region_1 == "Georgia" | sub_region_1 == "Arizona" | sub_region_1 == "Wisconsin" | 
+                                              sub_region_1 == "Pennsylvania" |sub_region_1 == "North Carolina" |
+                                              sub_region_1 == "Michigan" |sub_region_1 == "Nevada" |sub_region_1 == "Florida" |
+                                              sub_region_1 == "Texas" | sub_region_1 == "Minnesota" |sub_region_1 == "New Hampshire")
+```
+
+```{r, eval=FALSE}
+compliance2020 <- compliance2020 %>% 
+  filter(sub_region_2 != "") %>%
+  select(-1,-2,-5,-6,-7,-8)
+compliance2020$date <- as.Date(compliance2020$date)
+
+```
+
+```{r, eval=FALSE}
+onemonth <- compliance2020 %>%
+  filter(date + 30 >= as.Date("2020-11-03") & date <= as.Date("2020-11-03"))
+onemonthmeans1 <- onemonth %>%
+  group_by(sub_region_1, sub_region_2) %>%
+  select(1,2,4) %>%
+  na.omit()%>%
+  summarise(retail_recreation = mean(retail_and_recreation_percent_change_from_baseline))
+  
+onemonthmeans2 <- onemonth %>%
+  group_by(sub_region_1, sub_region_2) %>% 
+  select(1,2,5) %>%
+  na.omit()%>%
+  summarise(grocery_pharmacy = mean(grocery_and_pharmacy_percent_change_from_baseline))
+
+onemonthmeans3 <- onemonth %>%
+  group_by(sub_region_1, sub_region_2) %>%
+  select(1,2,6) %>%
+  na.omit() %>%
+  summarise(parks = mean(parks_percent_change_from_baseline))
+
+onemonthmeans4 <- onemonth %>%
+  group_by(sub_region_1, sub_region_2) %>%
+   select(1,2,7) %>%
+  na.omit()%>%
+  summarise(transit = mean(transit_stations_percent_change_from_baseline))
+
+onemonthmeans5 <- onemonth %>%
+  group_by(sub_region_1, sub_region_2) %>%
+   select(1,2,8) %>%
+  na.omit()%>%
+  summarise(workplace = mean(workplaces_percent_change_from_baseline))
+
+onemonthmeans6 <- onemonth %>%
+  group_by(sub_region_1, sub_region_2) %>%
+   select(1,2,9) %>%
+  na.omit()%>%
+  summarise(residential = mean(residential_percent_change_from_baseline))
+
+
+```
+```{r, eval=FALSE}
+temp1 <- left_join(onemonthmeans1, onemonthmeans2, by = c("sub_region_1"="sub_region_1", "sub_region_2" = "sub_region_2"))
+temp1 <- left_join(temp1, onemonthmeans3, by = c("sub_region_1"="sub_region_1", "sub_region_2" = "sub_region_2"))
+temp1 <- left_join(temp1, onemonthmeans4, by = c("sub_region_1"="sub_region_1", "sub_region_2" = "sub_region_2"))
+temp1 <- left_join(temp1, onemonthmeans5, by = c("sub_region_1"="sub_region_1", "sub_region_2" = "sub_region_2"))
+onemonthmeans <- left_join(temp1, onemonthmeans6, by = c("sub_region_1"="sub_region_1", "sub_region_2" = "sub_region_2"))
+```
+
+
+
+
+
+```{r, eval=FALSE}
+ga_results <- read_excel("ga_counties.xlsx") #Got from SoS
+az_results <- read_excel("az_counties.xlsx") #SoS
+wi_results <- read_excel("wi_counties.xlsx") #SoS
+pa_results <- read_excel("pa_counties.xlsx")  #SoS
+nc_results_precinct <- read.csv("nc_precincts.csv") #Open Elections
+mi_results <- read_excel("mi_counties.xlsx") #Secretary of state
+nv_results_precinct <- read.csv("nv_precincts.csv") #Open Elections
+fl_results <- read.csv("fl_counties.csv") #Open Elections
+tx_results <- read_excel("tx_counties.xlsx") #SoS
+mn_results_precinct <- read.csv("mn_precincts.csv") #Open Elections
+nh_results_precinct <- read.csv("nh_precincts.csv") #Open Elections
+```
+```{r, eval=FALSE}
+az_results <- az_results %>%
+  rename(county = 1, Biden = 2, Trump = 3)
+az_results$state <- "Arizona"
+
+```
+
+
+
+```{r, eval=FALSE}
+nv_results_precinct$votes <- as.integer(nv_results_precinct$votes)
+nv_results_precinct$votes[is.na(nv_results_precinct$votes)] <- 0
+nv_results <- nv_results_precinct %>%
+  select(county,precinct,office,candidate, votes) %>%
+  filter(office == "President") %>%
+  filter(candidate == "BIDEN, JOSEPH R." | candidate == "TRUMP, DONALD J.") %>%
+  select(-office) %>%
+  group_by(county, candidate) %>%
+  summarise(sum_votes = sum(votes)) %>%
+  rename(votes = sum_votes)
+nv_results$state <- "Nevada"
+
+```
+
+```{r, eval=FALSE}
+mn_results <- mn_results_precinct %>%
+  select(county,precinct,office,candidate, votes) %>%
+  filter(office == "President") %>%
+  filter(candidate == "Joseph R. Biden and Kamala Harris" | candidate == "Donald J. Trump and Michael R. Pence") %>%
+  select(-office) %>%
+  group_by(county, candidate) %>%
+  summarise(sum_votes = sum(votes)) %>%
+  rename(votes = sum_votes)
+mn_results$state <- "Minnesota"
+```
+
+```{r, eval=FALSE}
+nh_results_precinct$votes <- as.integer(nh_results_precinct$votes)
+nh_results_precinct$votes[is.na(nh_results_precinct$votes)] <- 0
+nh_results_precinct$county[which(nh_results_precinct$county == "Rockingham ")] <- "Rockingham"
+nh_results <- nh_results_precinct %>%
+  select(county, precinct, office, candidate, votes) %>%
+  filter(county != "TOTALS" & county != "NEW HAMPSHIRE" & county != "NEW HAMPSHIRE TOTAL" & county != "") %>%
+  filter(office == "President") %>%
+  select(-office) %>%
+  filter(candidate != "Jo Jorgensen") %>%
+  filter(precinct == "BELKNAP" | precinct == "CARROLL NH" | precinct == "COOS NH'" | precinct == "GRAFTON NH" | precinct == "HILLSBOROUGH NH" | precinct == "MERRIMACK NH" |
+           precinct == "GRAFTON NH" | precinct == "TOTALS" | precinct == "CHESHIRE NH") %>%
+  select(-precinct)
+nh_results$state <- "New Hampshire"
+```
+
+```{r, eval=FALSE}
+nc_results <- nc_results_precinct %>%
+  select(name_raw, office, parent_jurisdiction, jurisdiction, votes) %>%
+  rename(candidate = name_raw, county = parent_jurisdiction, precinct = jurisdiction) %>%
+  filter(office == "US PRESIDENT") %>%
+  filter(candidate == "Donald J. Trump" | candidate == "Joseph R. Biden") %>%
+  group_by(county, candidate) %>%
+  summarise(sum_votes = sum(votes)) %>%
+  rename(votes = sum_votes)
+nc_results$state <- "North Carolina"
+```
+
+```{r, eval=FALSE}
+fl_results <- fl_results %>%
+  select(county, office, candidate, votes) %>%
+  filter(office == "President") %>%
+  select(-office) %>%
+  filter(candidate == "Biden / Harris" | candidate == "Trump / Pence")
+fl_results$state <- "Florida"
+```
+
+```{r, eval=FALSE}
+ga_results$state <- "Georgia"
+ga_results <- ga_results %>%
+  rename(Trump = 2, Biden = 3)
+```
+
+```{r, eval=FALSE}
+mi_results <- mi_results %>%
+  select(CountyName, OfficeDescription, CandidateLastName, CandidateVotes) %>%
+  filter(OfficeDescription == "President of the United States 4 Year Term (1) Position") %>%
+  rename(county = CountyName, office = OfficeDescription, candidate = CandidateLastName, votes = CandidateVotes) %>%
+  select(-office) %>%
+  filter(candidate == "Biden" | candidate == "Trump")
+mi_results$state <- "Michigan"
+```
+
+```{r, eval=FALSE}
+pa_results <- pa_results %>%
+  select(`County Name`, `Office Name`, `Candidate Name`, Votes) %>%
+  rename(county = `County Name`, office = `Office Name`, candidate = `Candidate Name`, votes = Votes) %>%
+  select(-office)
+pa_results$state <- "Pennsylvania"
+pa_results$votes <- as.numeric(gsub(",","", pa_results$votes))
+```
+
+```{r, eval=FALSE}
+tx_results <- tx_results %>%
+  select(`COUNTY NAME`, `OFFICE NAME`, `CANDIDATE NAME`, `TOTAL VOTES PER OFFICE PER COUNTY`)%>%
+  rename(county = `COUNTY NAME`, office = `OFFICE NAME`, candidate = `CANDIDATE NAME`, votes = `TOTAL VOTES PER OFFICE PER COUNTY`) %>%
+  filter(candidate == "JOSEPH R. BIDEN/KAMALA D. HARRIS" | candidate == "DONALD J. TRUMP/MICHAEL R. PENCE") %>%
+  select(-office)
+tx_results$state <- "Texas"
+tx_results$votes <- as.numeric(gsub(",","", tx_results$votes))
+```
+
+```{r, eval=FALSE}
+wi_results <- wi_results %>%
+  select(-...2) %>%
+  rename(Biden = 2, Trump = 3)
+wi_results$state <- "Wisconsin"
+```
+
+
+```{r, eval=FALSE}
+fl_results$candidate[which(fl_results$candidate == "Trump / Pence")] <- "Trump"
+fl_results$candidate[which(fl_results$candidate == "Biden / Harris")] <- "Biden"
+
+mn_results$candidate[which(mn_results$candidate == "Donald J. Trump and Michael R. Pence")] = "Trump"
+mn_results$candidate[which(mn_results$candidate == "Joseph R. Biden and Kamala Harris")] = "Biden"
+
+nc_results$candidate[which(nc_results$candidate == "Donald J. Trump")] = "Trump"
+nc_results$candidate[which(nc_results$candidate == "Joseph R. Biden")] = "Biden"
+
+nh_results$candidate[which(nh_results$candidate == "Donald Trump")] = "Trump"
+nh_results$candidate[which(nh_results$candidate == "Joe Biden")] = "Biden"
+
+nv_results$candidate[which(nv_results$candidate == "TRUMP, DONALD J.")] = "Trump"
+nv_results$candidate[which(nv_results$candidate == "BIDEN, JOSEPH R.")] = "Biden"
+
+pa_results$candidate[which(pa_results$candidate == "TRUMP, DONALD J.")] = "Trump"
+pa_results$candidate[which(pa_results$candidate == "BIDEN, JOSEPH ROBINETTE JR")] = "Biden"
+```
+
+```{r, eval=FALSE}
+tx_results$candidate[which(tx_results$candidate == unique(tx_results$candidate)[2])] = "Trump"
+tx_results$candidate[which(tx_results$candidate == unique(tx_results$candidate)[1])] = "Biden"
+```
+
+```{r, eval=FALSE}
+fl_results$Biden <- as.integer((fl_results$candidate == "Biden"))*fl_results$votes
+fl_results$Trump <- as.integer((fl_results$candidate == "Trump"))*fl_results$votes
+fl_resultsbiden <- fl_results %>%
+  group_by(county) %>%
+  summarise(Biden = sum(Biden))
+fl_resultstrump <- fl_results %>%
+  group_by(county) %>%
+  summarise(Trump = sum(Trump))
+fl_results <- left_join(fl_resultsbiden, fl_resultstrump, by = "county")
+fl_results$state <- "Florida"
+```
+
+```{r, eval=FALSE}
+mi_results$Biden <- as.integer((mi_results$candidate == "Biden"))*mi_results$votes
+mi_results$Trump <- as.integer((mi_results$candidate == "Trump"))*mi_results$votes
+mi_resultsbiden <- mi_results %>%
+  group_by(county) %>%
+  summarise(Biden = sum(Biden))
+mi_resultstrump <- mi_results %>%
+  group_by(county) %>%
+  summarise(Trump = sum(Trump))
+mi_results <- left_join(mi_resultsbiden, mi_resultstrump, by = "county")
+mi_results$state <- "Michigan"
+```
+
+```{r, eval=FALSE}
+mn_results$Biden <- as.integer((mn_results$candidate == "Biden"))*mn_results$votes
+mn_results$Trump <- as.integer((mn_results$candidate == "Trump"))*mn_results$votes
+mn_resultsbiden <- mn_results %>%
+  group_by(county) %>%
+  summarise(Biden = sum(Biden))
+mn_resultstrump <- mn_results %>%
+  group_by(county) %>%
+  summarise(Trump = sum(Trump))
+mn_results <- left_join(mn_resultsbiden, mn_resultstrump, by = "county")
+mn_results$state <- "Minnesota"
+```
+
+```{r, eval=FALSE}
+nc_results$Biden <- as.integer((nc_results$candidate == "Biden"))*nc_results$votes
+nc_results$Trump <- as.integer((nc_results$candidate == "Trump"))*nc_results$votes
+nc_resultsbiden <- nc_results %>%
+  group_by(county) %>%
+  summarise(Biden = sum(Biden))
+nc_resultstrump <- nc_results %>%
+  group_by(county) %>%
+  summarise(Trump = sum(Trump))
+nc_results <- left_join(nc_resultsbiden, nc_resultstrump, by = "county")
+nc_results$state <- "North Carolina"
+```
+
+```{r, eval=FALSE}
+nh_results$Biden <- as.integer((nh_results$candidate == "Biden"))*nh_results$votes
+nh_results$Trump <- as.integer((nh_results$candidate == "Trump"))*nh_results$votes
+nh_resultsbiden <- nh_results %>%
+  group_by(county) %>%
+  summarise(Biden = sum(Biden))
+nh_resultstrump <- nh_results %>%
+  group_by(county) %>%
+  summarise(Trump = sum(Trump))
+nh_results <- left_join(nh_resultsbiden, nh_resultstrump, by = "county")
+nh_results$state <- "New Hampshire"
+```
+
+```{r, eval=FALSE}
+nv_results$Biden <- as.integer((nv_results$candidate == "Biden"))*nv_results$votes
+nv_results$Trump <- as.integer((nv_results$candidate == "Trump"))*nv_results$votes
+nv_resultsbiden <- nv_results %>%
+  group_by(county) %>%
+  summarise(Biden = sum(Biden))
+nv_resultstrump <- nv_results %>%
+  group_by(county) %>%
+  summarise(Trump = sum(Trump))
+nv_results <- left_join(nv_resultsbiden, nv_resultstrump, by = "county")
+nv_results$state <- "Nevada"
+```
+
+```{r, eval=FALSE}
+pa_results$Biden <- as.integer((pa_results$candidate == "Biden"))*pa_results$votes
+pa_results$Trump <- as.integer((pa_results$candidate == "Trump"))*pa_results$votes
+pa_resultsbiden <- pa_results %>%
+  group_by(county) %>%
+  summarise(Biden = sum(Biden))
+pa_resultstrump <- pa_results %>%
+  group_by(county) %>%
+  summarise(Trump = sum(Trump))
+pa_results <- left_join(pa_resultsbiden, pa_resultstrump, by = "county")
+pa_results$state <- "Pennsylvania"
+
+```
+
+```{r, eval=FALSE}
+tx_results$Biden <- as.integer((tx_results$candidate == "Biden"))*tx_results$votes
+tx_results$Trump <- as.integer((tx_results$candidate == "Trump"))*tx_results$votes
+tx_resultsbiden <- tx_results %>%
+  group_by(county) %>%
+  summarise(Biden = sum(Biden))
+tx_resultstrump <- tx_results %>%
+  group_by(county) %>%
+  summarise(Trump = sum(Trump))
+tx_results <- left_join(tx_resultsbiden, tx_resultstrump, by = "county")
+tx_results$state <- "Texas"
+```
+
+
+```{r, eval=FALSE}
+ga_results <- ga_results %>%
+  rename(county = County)
+wi_results <- wi_results %>%
+  rename(county = County)
+ga_results <- ga_results[,c(1,3,2,4)]
+election_results <- rbind(az_results, fl_results, ga_results, mi_results, mn_results, nc_results, nh_results, nv_results, wi_results)
+election_results <- election_results[,c(4,1,2,3)]
+```
+
+
+```{r, eval=FALSE}
+covid_counties <- read.csv("counties_covid.csv")
+```
+
+```{r, eval=FALSE}
+covid_counties <- covid_counties %>%
+  filter(date == "2020-11-03") %>%
+  select(-date, -geoid)
+```
+
+
+```{r, eval=FALSE}
+lockdown_data <- read.csv("lockdown_stringency.csv")
+```
+
+```{r, eval=FALSE}
+lockdown_data <- lockdown_data %>%
+  filter(Date == 20201103) %>%
+  select(-CountryName, -CountryCode, -RegionCode, -Jurisdiction, -Date) %>%
+  select(RegionName,C1_School.closing,C2_Workplace.closing, C3_Cancel.public.events, C4_Restrictions.on.gatherings, C5_Close.public.transport, C6_Stay.at.home.requirements, C7_Restrictions.on.internal.movement,
+         C8_International.travel.controls)
+
+```
+
+
+
+
+```{r, eval=FALSE}
+final1 <- left_join(election_results, covid_counties, by = c("county" = "county", "state" = "state"))
+final2 <- left_join(final1, lockdown_data, by = c("state" = "RegionName"))
+onemonthmeans$sub_region_2 <- gsub(" County", "", onemonthmeans$sub_region_2)
+final3 <- left_join(final2, onemonthmeans, by = c("state" = "sub_region_1", "county" = "sub_region_2"))
+project_data <- final3
+```
+
+
+
+
+
+
+
+
